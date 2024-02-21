@@ -28,6 +28,8 @@ const getUserWithEmail = function (email) {
     console.error('query error', err.stack)
   })
 };
+exports.getUserWithEmail = getUserWithEmail;
+
 
 /**
  * Get a single user from the database given their id.
@@ -44,7 +46,7 @@ const getUserWithId = function (id) {
     console.error('query error', err.stack)
   })
 };
-
+exports.getUserWithId = getUserWithId;
 
 /**
  * Add a new user to the database.
@@ -63,10 +65,9 @@ const addUser = function (user) {
     console.error('query error', err.stack)
   })
 };
-
+exports.addUser = addUser;
 
 /// Reservations
-
 /**
  * Get all reservations for a single user.
  * @param {string} guest_id The id of the user.
@@ -88,22 +89,75 @@ const getAllReservations = function(guest_id, limit = 20) {
     console.error('query error', err.stack);
   })
 };
+exports.getAllReservations = getAllReservations;
 
 /// Properties
-
 /**
  * Get all properties.
  * @param {{}} options An object containing query options.
  * @param {*} limit The number of results to return.
  * @return {Promise<[{}]>}  A promise to the properties.
  */
-const getAllProperties = function (options, limit = 10) {
-  const limitedProperties = {};
-  for (let i = 1; i <= limit; i++) {
-    limitedProperties[i] = properties[i];
+const getAllProperties = function(options, limit = 10) {
+
+  const queryParams = [];
+  let queryString = `
+  SELECT properties.*, AVG(property_reviews.rating) AS average_rating
+  FROM properties
+  JOIN property_reviews ON properties.id = property_reviews.property_id
+  `;
+
+  // Check if a city has been passed in as an option
+  if (options.city){
+    queryParams.push(`%${options.city}%`);
+    queryString +=  `WHERE city LIKE $${queryParams.length}`;
   }
-  return Promise.resolve(limitedProperties);
-};
+
+  // select the properties for the owner
+  if (options.owner_id) {
+    queryParams.push(options.owner_id);
+    queryString += (queryParams.length ? `AND ` : 'WHERE ');
+    queryString += `properties.owner_id = $${queryParams.length} `;
+  }
+
+  // price range search
+  if (options.minimum_price_per_night) {
+    queryParams.push(options.minimum_price_per_night * 100);
+    queryString += (queryParams.length ? `AND ` : 'WHERE ');
+    queryString += `properties.cost_per_night >= $${queryParams.length} ` ;
+  }
+
+  if (options.maximum_price_per_night) {
+    queryParams.push(options.maximum_price_per_night * 100);
+    queryString += (queryParams.length ? `AND ` : 'WHERE ');
+    queryString += `properties.cost_per_night <= $${queryParams.length} ` ;
+  }
+
+  queryString += `GROUP BY properties.id `
+
+  // return ratings only above the rating given by user
+  if (options.minimum_rating) {
+    queryParams.push(options.minimum_rating);
+    queryString += `
+  HAVING AVG(property_reviews.rating) >= $${queryParams.length} `;
+  }
+
+  queryParams.push(limit);
+  queryString += `
+  ORDER BY cost_per_night
+  LIMIT $${queryParams.length};
+  `;
+
+  console.log(queryString, queryParams);
+
+  // run the query with the user input variables
+  return pool.query(queryString, queryParams)
+  .then(res => res.rows)
+  .catch((err) => {
+    console.error('query error', err.stack);
+  });
+}
+exports.getAllProperties = getAllProperties;
 
 /**
  * Add a property to the database
